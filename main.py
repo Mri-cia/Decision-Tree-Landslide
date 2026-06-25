@@ -14,19 +14,34 @@ pilihan_data = [
 
 df_selected = df[pilihan_data].dropna().copy()
 
+# jumlah_sample = 600
+
+# df_small = df_selected[df_selected['landslide_size'] == 'small']
+# df_small = df_small.sample(n=jumlah_sample, random_state=42)
+
+# df_medium = df_selected[df_selected['landslide_size'] == 'medium']
+# df_medium = df_medium.sample(n=jumlah_sample, random_state=42)
+
+# df_large = df_selected[df_selected['landslide_size'] == 'large']
+# df_large = df_large.sample(n=jumlah_sample, random_state=42)
+
+# df_selected = pd.concat([df_small, df_medium, df_large])
+
+# df_selected = df_selected.sample(frac=1, random_state=42).reset_index(drop=True)
+
 # Filter data besaran longsor 
 kelas_populer = ['small', 'medium', 'large']
 df_selected = df_selected[df_selected['landslide_size'].isin(kelas_populer)].copy()
 
 # Filter data kategori longsor
-kategori_populer = ['landslide', 'mudslide', 'debris_flow', 'rockfall']
-df_selected = df_selected[df_selected['landslide_category'].isin(kategori_populer)].copy()
+# kategori_populer = ['landslide', 'mudslide', 'debris_flow', 'rockfall']
+# df_selected = df_selected[df_selected['landslide_category'].isin(kategori_populer)].copy()
 
 # Pengambilan sample
-df_sample = df_selected.sample(n=1000, random_state=42).reset_index(drop=True)
+df_sample = df_selected#.sample(n=1000, random_state=42).reset_index(drop=True)
 
 # Karakteristik untuk pertimbangan
-fitur = ['landslide_trigger', 'landslide_category']
+fitur = ['landslide_trigger', 'landslide_category', 'country_name']
 
 
 # Gini Impurity
@@ -35,7 +50,8 @@ fitur = ['landslide_trigger', 'landslide_category']
 # G = 1 - p(1)^2 - p(2)^2 - ... - p(n)^2
 # Keterangan: Dengan p(n) atau p(i) sebagai proporsi dari setiap kelas dalam node.
 #
-# 
+# .value_counts() digunakan untuk menghitung jumlah data unik.
+#
 def hitung_gini(y):
     if len(y) == 0:
         return 0
@@ -67,8 +83,8 @@ def cari_split_terbaik(data, fitur_list):
     return best_fitur, best_kategori
 
 
-def bangun_pohon_kategorikal(data, fitur_list, kedalaman=0, max_depth=8):
-    # Base Case: Jika data sudah murni atau mencapai batas kedalaman (diubah ke 8 agar menampung 3 fitur dengan baik)
+def bangun_pohon_kategorikal(data, fitur_list, kedalaman=0, max_depth=12):
+    # Base Case: Jika data sudah murni atau mencapai batas kedalaman (diubah ke 12 agar menampung 3 fitur dengan baik)
     if hitung_gini(data['landslide_size']) == 0 or kedalaman >= max_depth or len(data) < 10:
         return data['landslide_size'].value_counts().idxmax()
     
@@ -100,10 +116,137 @@ def prediksi_pohon_kategorikal(pohon, data_baru):
     else:
         return prediksi_pohon_kategorikal(pohon['kanan'], data_baru)
 
+def hitung_akurasi_pohon(pohon, data_uji):
+    prediksi_benar = 0
+    total_data = len(data_uji)
+    
+    # Lakukan looping untuk memeriksa setiap baris data uji
+    for index, baris in data_uji.iterrows():
+        # Ambil tebakan dari pohon keputusan kustom Anda
+        tebakan = prediksi_pohon_kategorikal(pohon, baris)
+        
+        # Bandingkan dengan label asli di dataset
+        if tebakan == baris['landslide_size']:
+            prediksi_benar += 1
+            
+    # Hitung persentase akhir
+    skor_akurasi = (prediksi_benar / total_data) * 100
+    return skor_akurasi
 
 
-print("Sedang melatih Decision Tree (Features: Trigger, Category, & Country)...")
-pohon_kategorikal = bangun_pohon_kategorikal(df_sample, fitur, max_depth=8)
+def hitung_metrik_detail(pohon, data_uji, kelas_target=['small', 'medium', 'large']):
+    # Inisialisasi dictionary untuk menampung komponen hitungan per kelas
+    # TP = True Positive, FP = False Positive, FN = False Negative
+    stats = {k: {'TP': 0, 'FP': 0, 'FN': 0} for k in kelas_target}
+    
+    # 1. Kumpulkan semua prediksi vs data asli
+    for index, baris in data_uji.iterrows():
+        aktual = baris['landslide_size']
+        prediksi = prediksi_pohon_kategorikal(pohon, baris)
+        
+        if aktual == prediksi:
+            # Jika tebakan benar, maka ini adalah TP untuk kelas tersebut
+            stats[aktual]['TP'] += 1
+        else:
+            # Jika tebakan salah:
+            # Menjadi FP bagi kelas yang DI-PREDIKSI (salah tebak kelas orang lain)
+            stats[prediksi]['FP'] += 1
+            # Menjadi FN bagi kelas AKTUAL (kelas aslinya gagal terdeteksi)
+            stats[aktual]['FN'] += 1
+            
+    # 2. Hitung Precision, Recall, dan F1-Score per kelas
+    tabel_metrik = {}
+    total_precision = 0
+    total_recall = 0
+    
+    for k in kelas_target:
+        tp = stats[k]['TP']
+        fp = stats[k]['FP']
+        fn = stats[k]['FN']
+        
+        # Rumus Precision = TP / (TP + FP)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        
+        # Rumus Recall = TP / (TP + FN)
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        
+        # Rumus F1-Score = 2 * (P * R) / (P + R)
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        
+        tabel_metrik[k] = {
+            'Precision': precision * 100,
+            'Recall': recall * 100,
+            'F1-Score': f1 * 100
+        }
+        
+        total_precision += precision
+        total_recall += recall
+
+    # 3. Hitung Rata-rata Makro (Macro Average) untuk kesimpulan global
+    macro_precision = (total_precision / len(kelas_target)) * 100
+    macro_recall = (total_recall / len(kelas_target)) * 100
+    macro_f1 = 2 * (macro_precision * macro_recall) / (macro_precision + macro_recall) if (macro_precision + macro_recall) > 0 else 0.0
+    
+    tabel_metrik['MACRO AVERAGE'] = {
+        'Precision': macro_precision,
+        'Recall': macro_recall,
+        'F1-Score': macro_f1
+    }
+    
+    return tabel_metrik
+
+
+
+
+# 1. Acak data terlebih dahulu
+df_sample = df_selected#.sample(n=200, random_state=42).reset_index(drop=True)
+
+# 2. Bagi data menjadi 80% Train dan 20% Test
+batas_split = int(0.8 * len(df_sample))
+data_train = df_sample.iloc[:batas_split]
+data_test = df_sample.iloc[batas_split:]
+
+# 3. Latih pohon HANYA menggunakan data_train
+pohon_final = bangun_pohon_kategorikal(data_train, fitur, max_depth=12)
+
+# 4. Hitung akurasi menggunakan data_test (data yang belum pernah dilihat pohon)
+akurasi_model = hitung_akurasi_pohon(pohon_final, data_test)
+
+print(f"=== EVALUASI MODEL ===")
+print(f"Jumlah Data Latih: {len(data_train)} baris")
+print(f"Jumlah Data Uji  : {len(data_test)} baris")
+print(f"Akurasi Model Decision Tree Kustom: {akurasi_model:.2f}%")
+
+
+
+# [Pastikan Anda sudah membagi data_train dan data_test (80/20) di atasnya]
+
+# 1. Latih pohon final
+pohon_final = bangun_pohon_kategorikal(data_train, fitur, max_depth=8)
+
+# 2. Hitung Akurasi Global
+akurasi_global = hitung_akurasi_pohon(pohon_final, data_test)
+
+# 3. Hitung Detail Precision, Recall, dan F1-Score
+hasil_metrik = hitung_metrik_detail(pohon_final, data_test)
+
+# 4. Cetak Output Laporan untuk Bab 4 Skripsi
+print("\n" + "="*50)
+print("         LAPORAN EVALUASI MODEL DETAIL         ")
+print("="*50)
+print(f"Akurasi Global Model: {akurasi_global:.2f}%\n")
+
+print(f"{'Kelas Karakteristik':<18} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10}")
+print("-"*57)
+for kelas, nilai in hasil_metrik.items():
+    if kelas == 'MACRO AVERAGE':
+        print("-"*57) # Garis pembatas untuk rata-rata akhir
+    print(f"{kelas:<18} | {nilai['Precision']:<9.2f}% | {nilai['Recall']:<9.2f}% | {nilai['F1-Score']:<9.2f}%")
+print("="*50)
+
+
+print("\n\nSedang melatih Decision Tree (Features: Trigger, Category, & Country)...")
+pohon_kategorikal = bangun_pohon_kategorikal(df_sample, fitur, max_depth=12)
 
 longsor_baru = {
     'landslide_trigger': 'flooding',
