@@ -1,6 +1,50 @@
 import pandas as pd
 import numpy as np
 
+from graphviz import Digraph
+# import os
+
+# jalur_graphviz = r"C:\Program Files\Graphviz\bin" 
+
+# os.environ["PATH"] += os.pathsep + jalur_graphviz
+
+def visualisasikan_pohon_graphviz(pohon, dot=None, node_id="0"):
+    # Jika pertama kali dipanggil, buat objek Digraph baru
+    if dot is None:
+        dot = Digraph(comment='Pohon Keputusan Longsor', format='png')
+        dot.attr(rankdir='TB', size='10,10')
+        dot.attr(dpi='300')          # Meningkatkan ketajaman gambar (High Resolution)
+        dot.attr(size='30,30!')      # Memberikan ruang kanvas yang jauh lebih luas (dalam inci)
+        dot.attr(ratio='compress')
+        # Mengatur desain kotak agar rapi
+        dot.attr('node', shape='box', style='filled,rounded', color='black', fontname='helvetica')
+
+    # BASE CASE: Jika simpul adalah daun (string jawaban seperti 'small', 'medium', etc)
+    if not isinstance(pohon, dict):
+        # Beri warna hijau muda untuk daun keputusan final
+        dot.node(node_id, f"PREDIKSI:\n{pohon.upper()}", fillcolor='#95e1d3', style='filled,bold')
+        return dot
+
+    # IF NODE: Jika simpul adalah aturan pemisah (dictionary)
+    label_node = f"Apakah {pohon['fitur']}\n== '{pohon['kategori_aturan']}'?"
+    dot.node(node_id, label_node, fillcolor='#eaffd0')
+
+    # Buat ID unik untuk cabang anak kiri dan anak kanan
+    id_kiri = node_id + "_kiri"
+    id_kanan = node_id + "_kanan"
+
+    # Rekursi ke cabang KIRI (Memenuhi syarat / YA)
+    visualisasikan_pohon_graphviz(pohon['kiri'], dot, id_kiri)
+    dot.edge(node_id, id_kiri, label=" Ya ", color='#21bf73', fontcolor='#21bf73', penwidth='2')
+
+    # Rekursi ke cabang KANAN (Tidak memenuhi syarat / TIDAK)
+    visualisasikan_pohon_graphviz(pohon['kanan'], dot, id_kanan)
+    dot.edge(node_id, id_kanan, label=" Tidak ", color='#fe346e', fontcolor='#fe346e', penwidth='2')
+
+    return dot
+
+
+
 # Membersihkan Data
 # Membaca, memilih, filter
 df = pd.read_csv('Global_Landslide_Catalog_Export_rows.csv')
@@ -194,7 +238,7 @@ def hitung_metrik_detail(pohon, data_uji, kelas_target=['small', 'medium', 'larg
 
 
 
-# 2. Bagi data menjadi 80% Train dan 20% Test
+# Bagi data menjadi 80% Train dan 20% Test
 batas_split = int(0.8 * len(df_selected))
 data_train = df_selected.iloc[:batas_split]
 data_test = df_selected.iloc[batas_split:]
@@ -251,3 +295,9 @@ print(f"Prediksi Ukuran/Keparahan Longsor (Size): {hasil_prediksi.upper()}")
 
 
 print("="*50)
+
+
+# Pembuatan visualisasi pohon
+grafik = visualisasikan_pohon_graphviz(pohon_final)
+grafik.render('visualisasi_pohon_longsor', view=True)
+print("Selesai! File 'visualisasi_pohon_longsor.png' telah berhasil dibuat.")
